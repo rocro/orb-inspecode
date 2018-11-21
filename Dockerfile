@@ -1,5 +1,6 @@
-FROM stedolan/jq
+FROM debian:stretch-slim
 
-RUN apt-get update && apt-get install -y curl
+ENV LANG C.UTF-8  # to show emoji
+RUN apt-get update && apt-get install -y jq curl
 
 ENTRYPOINT []
