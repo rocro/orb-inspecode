@@ -1,0 +1,171 @@
+version: 2.1
+
+description: |
+  Run new Rocro Inspecode jobs
+
+examples:
+  simple:
+    description: |
+      Run a new Rocro Inspecode job associated with the same Git revision as the current CircleCI job
+    usage:
+      version: 2.1
+      orbs:
+        inspecode: rocro/inspecode@1.0.0
+      workflows:
+        run_inspecode_job:
+          jobs:
+            - inspecode/run:
+                api_token: <Your API Token>
+
+jobs:
+  run:
+    description: Run a Rocro Inspecode job and wait for it to complete
+    executor: default
+    parameters:
+      api_token:
+        description: Your token to access the Inspecode API
+        type: string
+        default: "${INSPECODE_API_TOKEN}"
+      service:
+        description: VCS provider
+        type: enum
+        enum: ["github", "bitbucket"]
+        default: "github"
+      account:
+        description: Name of your individual or organization account
+        type: string
+        default: "${CIRCLE_PROJECT_USERNAME}"
+      repository:
+        description: Your repository name
+        type: string
+        default: "${CIRCLE_PROJECT_REPONAME}"
+      branch:
+        description: Your branch name
+        type: string
+        default: "${CIRCLE_BRANCH}"
+      commit:
+        description: Git commit ID
+        type: string
+        default: "${CIRCLE_SHA1}"
+      max_wait:
+        description: Maximum waiting time for the Inspecode job to finish. The format must be a number with unit suffix such as “20m”, “1.25h”, and “5s”.
+        type: string
+        default: "30m"
+    steps:
+      - start_job:
+          api_token: << parameters.api_token >>
+          service: << parameters.service >>
+          account: << parameters.account >>
+          repository: << parameters.repository >>
+          branch: << parameters.branch >>
+          commit: << parameters.commit >>
+      - wait_until_finished:
+          api_token: << parameters.api_token >>
+          service: << parameters.service >>
+          account: << parameters.account >>
+          repository: << parameters.repository >>
+          max_wait: << parameters.max_wait >>
+
+commands:
+  start_job:
+    description: Run a new Inspecode job
+    parameters:
+      api_token:
+        description: Your token to access the Inspecode API
+        type: string
+        default: "${INSPECODE_API_TOKEN}"
+      service:
+        description: VCS provider
+        type: enum
+        enum: ["github", "bitbucket"]
+        default: "github"
+      account:
+        description: Name of your individual or organization account
+        type: string
+        default: "${CIRCLE_PROJECT_USERNAME}"
+      repository:
+        description: Your repository name
+        type: string
+        default: "${CIRCLE_PROJECT_REPONAME}"
+      branch:
+        description: Your branch name
+        type: string
+        default: "${CIRCLE_BRANCH}"
+      commit:
+        description: Git commit ID
+        type: string
+        default: "${CIRCLE_SHA1}"
+    steps:
+      - run:
+          name: Run a new Inspecode job
+          command: |
+            if [ << parameters.service >> = "github" ]; then
+              VCS_PROVIDER_DOMAIN="github.com"
+            else
+              VCS_PROVIDER_DOMAIN="bitbucket.org"
+            fi
+            INSPECODE_API_URL="https://inspecode.rocro.com/api/1/jobs/${VCS_PROVIDER_DOMAIN}/<< parameters.account >>/<< parameters.repository >>"
+            INSPECODE_API_REQUEST_BODY="{\"branch\":\"<< parameters.branch >>\",\"commit\":\"<< parameters.commit >>\"}"
+            INSPECODE_API_RESPONSE_BODY="$(curl --request POST --retry 3 --silent --show-error --fail \
+              -H "X-API-Token: << parameters.api_token >>" --data "${INSPECODE_API_REQUEST_BODY}" \
+              "${INSPECODE_API_URL}")"
+            INSPECODE_JOB_ID="$(echo "${INSPECODE_API_RESPONSE_BODY}" | jq -r .jobID)"
+            echo "export INSPECODE_JOB_ID='${INSPECODE_JOB_ID}'" >> $BASH_ENV
+            INSPECODE_REPORT_URL="https://inspecode.rocro.com/jobs/${VCS_PROVIDER_DOMAIN}/<< parameters.account >>/<< parameters.repository >>/${INSPECODE_JOB_ID}"
+            echo -e "The Inspecode job has started."
+            echo -e "See ${COLOR_GREEN}${INSPECODE_REPORT_URL}${COLOR_RESET} to check the progress \U0001f440"
+  wait_until_finished:
+    description: Wait for the Inspecode job to complete
+    parameters:
+      api_token:
+        description: Your token to access the Inspecode API
+        type: string
+        default: "${INSPECODE_API_TOKEN}"
+      service:
+        description: VCS provider
+        type: enum
+        enum: ["github", "bitbucket"]
+        default: "github"
+      account:
+        description: Name of your individual or organization account
+        type: string
+        default: "${CIRCLE_PROJECT_USERNAME}"
+      repository:
+        description: Your repository name
+        type: string
+        default: "${CIRCLE_PROJECT_REPONAME}"
+      max_wait:
+        description: Maximum waiting time for the Inspecode job to finish. The format must be a number with unit suffix such as “20m”, “1.25h”, and “5s”.
+        type: string
+        default: "30m"
+    steps:
+      - run:
+          name: Wait for the Inspecode job to complete
+          command: |
+            if [ << parameters.service >> = "github" ]; then
+              VCS_PROVIDER_DOMAIN="github.com"
+            else
+              VCS_PROVIDER_DOMAIN="bitbucket.org"
+            fi
+            INSPECODE_API_URL="https://inspecode.rocro.com/api/1/jobs/${VCS_PROVIDER_DOMAIN}/<< parameters.account >>/<< parameters.repository >>/${INSPECODE_JOB_ID}/status"
+            while :; do
+              INSPECODE_API_RESPONSE_BODY="$(curl --retry 3 --silent --show-error --fail \
+                -H "X-API-Token: << parameters.api_token >>" "${INSPECODE_API_URL}")"
+              if echo "${INSPECODE_API_RESPONSE_BODY}" | grep '"succeeded"\|"failed"\|"canceled"\|"aborted"\|"timed out"\|"skipped"\|"stopped"' >/dev/null; then
+                break
+              fi
+              sleep 5
+            done
+            INSPECODE_JOB_STATUS="$(echo "${INSPECODE_API_RESPONSE_BODY}" | jq -r .status)"
+            echo -e "${INSPECODE_JOB_STATUS}"
+            INSPECODE_REPORT_URL="https://inspecode.rocro.com/reports/${VCS_PROVIDER_DOMAIN}/<< parameters.account >>/<< parameters.repository >>/${INSPECODE_JOB_ID}/summary"
+            echo -e "See ${COLOR_GREEN}${INSPECODE_REPORT_URL}${COLOR_RESET} to check the code analysis report \U0001f4ca"
+          no_output_timeout: << parameters.max_wait >>
+
+executors:
+  default:
+    docker:
+      - image: rocro/orb-inspecode:1.0.4
+    environment:
+      COLOR_GREEN: '\033[0;32m'
+      COLOR_RESET: '\033[0m'
