@@ -79,4 +79,4 @@ workflows:
           attach-workspace: true
           checkout: false
           requires:
-            - orb-tools/test-in-builds
+            - orb-tools/pack
