@@ -3,6 +3,10 @@ version: 2.1
 description: |
   Run new Rocro Inspecode jobs
 
+display:
+  home_url: https://rocro.com/inspecode
+  source_url: https://github.com/rocro/orb-inspecode
+
 examples:
   simple:
     description: |
